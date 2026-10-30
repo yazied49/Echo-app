@@ -71,12 +71,12 @@
     <fieldset>
       <legend>نتيجة الإيكو <small>(الباقي Normal تلقائي)</small></legend>
       <label><span>Atrial septum</span>
-        <select name="Atrial septum" data-num="PFO size (mm)"><option>Normal</option><option>PFO</option></select></label>
-      <label class="num" data-for="PFO size (mm)"><span>PFO size (mm)</span><input name="PFO size (mm)" inputmode="decimal"></label>
+        <select name="Atrial septum" data-num="PFO size (mm)"><option>Normal</option><option>PFO</option><option>ASD II</option><option>ASD primum</option></select></label>
+      <label class="num" data-for="PFO size (mm)"><span>Defect size (mm)</span><input name="PFO size (mm)" inputmode="decimal"></label>
 
       <label><span>Ventricular septum</span>
-        <select name="Ventricular septum" data-num="VSD size (mm)"><option>Normal</option><option>VSD</option></select></label>
-      <label class="num" data-for="VSD size (mm)"><span>VSD size (mm)</span><input name="VSD size (mm)" inputmode="decimal"></label>
+        <select name="Ventricular septum" data-num="VSD size (mm)"><option>Normal</option><option>VSD</option><option>PMVSD</option><option>Apical VSD</option><option>MVSD</option></select></label>
+      <label class="num" data-for="VSD size (mm)"><span>Defect size (mm)</span><input name="VSD size (mm)" inputmode="decimal"></label>
 
       <label><span>Tricuspid valve</span>
         <select name="Tricuspid valve" data-num="RVSP (mmHg)"><option>Normal</option><option>Mild TR</option><option>Moderate TR</option><option>Severe TR</option></select></label>
@@ -115,6 +115,8 @@
     <div id="list"></div>
     <button type="button" id="syncBtn">ابعت للسيرفر</button>
     <button type="button" class="secondary" id="backupBtn">نسخة احتياطية (ملف)</button>
+    <label style="margin-top:14px"><span>كود الدخول <small>(بتكتبه مرة واحدة على كل جهاز)</small></span><input id="codeIn" type="password" autocomplete="off"></label>
+    <button type="button" class="secondary" id="codeSave">حفظ الكود</button>
     <div id="syncMsg" role="status" style="margin-top:8px;font-size:14px;color:var(--muted)"></div>
   </div>
   <p class="offline">كل حالة بتتحفظ على الجهاز باسمها، وبتتبعت للسيرفر لما يبقى فيه إنترنت.</p>
@@ -132,9 +134,14 @@ const STRUCTURES = [
   { id: 'situs', normal: 'Situs solitus, levocardia, AV-VA concordance.' },
   { id: 'venous', normal: 'Normal systemic & pulmonary venous drainage.' },
   { id: 'atrial_septum', normal: null, options: {
-    PFO: { echo: 'Patent Foramen Oval[, {size_mm} mm], with {shunt} shunt.', conclusion: 'PFO[, {size_mm} mm], {shunt} shunt.' } } },
+    PFO: { echo: 'Patent Foramen Oval[, {size_mm} mm], with {shunt} shunt.', conclusion: 'PFO[, {size_mm} mm], {shunt} shunt.' },
+    'ASD II': { echo: null, conclusion: null },
+    'ASD primum': { echo: null, conclusion: null } } },
   { id: 'ventricular_septum', normal: 'Intact intra Ventricular septum.', options: {
-    VSD: { echo: null, conclusion: null } } },
+    VSD: { echo: null, conclusion: null },
+    PMVSD: { echo: null, conclusion: null },
+    'Apical VSD': { echo: null, conclusion: null },
+    MVSD: { echo: null, conclusion: null } } },
   { id: 'tricuspid', normal: null, options: {
     TR: { echo: '{severity} Tricuspid valve regurgue[, RVSP = {rvsp} mmHg].', conclusion: '{severity} TR[, RVSP = {rvsp} mmHg].',
           concludeWhen: (f) => f.severity !== 'Mild' } } },
@@ -162,8 +169,11 @@ const f = FORM;
 const get = (k) => (f[k] === undefined || f[k] === null ? '' : String(f[k]).trim());
 const sev = (v) => v.replace(/\s*(TR|AS|PDA|MR|PS)$/i, '').trim();
 const findings = {};
-if (get('Atrial septum') === 'PFO') findings.atrial_septum = { option: 'PFO', size_mm: get('PFO size (mm)') };
-if (get('Ventricular septum') === 'VSD') findings.ventricular_septum = { option: 'VSD', size_mm: get('VSD size (mm)') };
+const SEPTAL = (v, opts) => (opts.includes(v) ? v : '');
+const asd = SEPTAL(get('Atrial septum'), ['PFO', 'ASD II', 'ASD primum']);
+if (asd) findings.atrial_septum = { option: asd, size_mm: get('PFO size (mm)') };
+const vsd = SEPTAL(get('Ventricular septum'), ['VSD', 'PMVSD', 'Apical VSD', 'MVSD']);
+if (vsd) findings.ventricular_septum = { option: vsd, size_mm: get('VSD size (mm)') };
 if (/TR$/i.test(get('Tricuspid valve'))) findings.tricuspid = { option: 'TR', severity: sev(get('Tricuspid valve')), rvsp: get('RVSP (mmHg)') };
 if (/MR$/i.test(get('Mitral valve'))) findings.mitral = { option: 'MR', severity: sev(get('Mitral valve')) };
 if (/PS$/i.test(get('Pulmonary valve'))) findings.pulmonary_valve = { option: 'PS', severity: sev(get('Pulmonary valve')), pg: get('PS PG (mmHg)') };
@@ -253,7 +263,7 @@ function noteBody() {
   const { conclusion } = compose('note');
   const place = c.nursery ? c.nursery.replace(/^حضانة\s*/, '') : c.origin;
   const ageLine = c.complaint ? c.patient.age + ', ' + c.complaint : c.patient.age;
-  let out = '';
+  let out = para(run(c.patient.name), { jc: 'right', after: 160 });
   if (place) out += para(run(place), { bidi: true, after: 160 });
   out += para(run(ageLine), { jc: 'right', after: 160 });
   out += para(run('ECHO:'), { jc: 'right', after: 160 });
@@ -367,7 +377,9 @@ function showPreview(res) {
 
 /* ===== local case log + sync to n8n ===== */
 const SYNC_URL = 'https://deeppink-trout-749734.hostingersite.com/webhook/echo-sync';
-const SYNC_TOKEN = 'b08f11b1c0a757631980418f4e5e95056072';
+const CODE_KEY = 'echo_access_code';
+function getCode() { try { return localStorage.getItem(CODE_KEY) || ''; } catch (e) { return ''; } }
+function setCode(v) { try { if (v) localStorage.setItem(CODE_KEY, v); else localStorage.removeItem(CODE_KEY); } catch (e) {} }
 const LS_KEY = 'echo_cases_v1';
 const listEl = document.getElementById('list'), syncMsg = document.getElementById('syncMsg');
 
@@ -401,24 +413,33 @@ function renderLog() {
 }
 
 let syncing = false;
-async function syncAll() {
+async function syncAll(manual) {
   if (syncing) return;
   const cases = loadCases(), todo = cases.filter((c) => !c.synced);
   if (!todo.length) { syncMsg.textContent = ''; return; }
-  syncing = true; let ok = 0, fail = 0;
+  const code = getCode();
+  if (!code) { syncMsg.textContent = 'اكتب كود الدخول في الخانة اللي فوق واضغط "حفظ الكود" عشان الحالات تتبعت. الحالات محفوظة على الجهاز.'; return; }
+  syncing = true; let ok = 0, fail = 0, badCode = false;
   for (const c of todo) {
     const { synced, ...rec } = c;
     try {
-      const r = await fetch(SYNC_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: SYNC_TOKEN, case: rec }) });
+      const r = await fetch(SYNC_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: code, case: rec }) });
       const j = await r.json().catch(() => ({}));
-      if (r.ok && j.ok) { c.synced = true; ok++; } else fail++;
+      if (r.ok && j.ok) { c.synced = true; ok++; } else if (r.status === 401) { badCode = true; setCode(''); break; } else fail++;
     } catch (e) { fail++; break; }
   }
   saveCases(cases); syncing = false; renderLog();
+  if (badCode) { syncMsg.textContent = 'الكود غلط. اكتبه تاني واضغط حفظ. الحالات لسه محفوظة على الجهاز.'; return; }
   syncMsg.textContent = fail ? 'اتبعت ' + ok + '، والباقي مستني (مفيش اتصال أو فيه مشكلة). الحالات محفوظة على الجهاز.' : 'اتبعت ' + ok + ' حالة للسيرفر ✓';
 }
-document.getElementById('syncBtn').addEventListener('click', syncAll);
-window.addEventListener('online', syncAll);
+document.getElementById('syncBtn').addEventListener('click', () => syncAll(true));
+const codeIn = document.getElementById('codeIn');
+if (getCode()) codeIn.placeholder = '•••••• (محفوظ)';
+document.getElementById('codeSave').addEventListener('click', () => {
+  const v = codeIn.value.trim(); if (!v) { syncMsg.textContent = 'اكتب الكود الأول.'; return; }
+  setCode(v); codeIn.value = ''; codeIn.placeholder = '•••••• (محفوظ)'; syncMsg.textContent = 'الكود اتحفظ.'; syncAll();
+});
+window.addEventListener('online', () => syncAll(false));
 document.getElementById('backupBtn').addEventListener('click', () => {
   const d = new Date().toISOString().slice(0, 10);
   download(new Blob([JSON.stringify(loadCases(), null, 1)], { type: 'application/json' }), 'echo-cases-backup-' + d + '.json');
@@ -444,7 +465,7 @@ form.addEventListener('submit', (ev) => {
   });
   const saved = saveCases(cases);
   msg.textContent = 'اتحمّل ملفين: ' + res.files[0].name + ' و ' + res.files[1].name + (saved ? ' واتحفظت الحالة على الجهاز' : ' (تنبيه: مقدرتش أحفظ الحالة على الجهاز)') + (res.needs ? ' (فيه جمل ناقصة معلّمة بالأصفر)' : '');
-  showPreview(res); renderLog(); syncAll();
+  showPreview(res); renderLog(); syncAll(false);
 });
 
 document.getElementById('newCase').addEventListener('click', () => {
