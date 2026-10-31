@@ -270,11 +270,11 @@ function noteBody() {
   const { conclusion } = compose('note');
   const place = c.nursery ? c.nursery.replace(/^حضانة\s*/, '') : c.origin;
   const ageLine = c.complaint ? c.patient.age + ', ' + c.complaint : c.patient.age;
-  let out = para(run(c.patient.name), { jc: 'right', after: 160 });
-  if (place) out += para(run(place), { bidi: true, after: 160 });
-  out += para(run(ageLine), { jc: 'right', after: 160 });
-  out += para(run('ECHO:'), { jc: 'right', after: 160 });
-  for (const l of conclusion) out += para(lineRun(l, 22), { jc: 'right', after: 160 });
+  let out = para(run(c.patient.name), { jc: 'left', after: 160 });
+  if (place) out += para(run(place), { jc: 'left', after: 160 });
+  out += para(run(ageLine), { jc: 'left', after: 160 });
+  out += para(run('ECHO:'), { jc: 'left', after: 160 });
+  for (const l of conclusion) out += para(lineRun(l, 22), { jc: 'left', after: 160 });
   return out;
 }
 
@@ -447,13 +447,15 @@ document.getElementById('pickDir').addEventListener('click', async () => {
 });
 (async () => { try { rootDir = (await idbGet('dir')) || null; } catch (e) { rootDir = null; } dirUi(); })();
 
+let showAll = false;
 function renderLog() {
   const cases = loadCases();
   const pending = cases.filter((c) => !c.synced).length;
   document.getElementById('count').textContent = '(' + cases.length + ')';
   document.getElementById('syncBtn').textContent = pending ? 'ابعت للسيرفر (' + pending + ' مستنية)' : 'كله اتبعت ✓';
   listEl.textContent = '';
-  cases.slice().reverse().slice(0, 30).forEach((c) => {
+  const shown = showAll ? cases.length : 5;
+  cases.slice().reverse().slice(0, shown).forEach((c) => {
     const row = document.createElement('div'); row.className = 'case';
     const nm = document.createElement('span'); nm.className = 'nm';
     nm.textContent = c.patient_name + (c.nursery ? ' (' + c.nursery + ')' : '') + ' · ' + c.case_date;
@@ -462,6 +464,12 @@ function renderLog() {
     b.addEventListener('click', async () => { try { const r = await deliverDocs(buildDocs(c.findings), c.month); syncMsg.textContent = r.folder ? 'اتحفظ في: ' + r.folder : 'اتحمّل الملفين.'; } catch (e) { syncMsg.textContent = 'خطأ: ' + e.message; } });
     row.append(nm, st, b); listEl.appendChild(row);
   });
+  if (cases.length > 5) {
+    const more = document.createElement('button'); more.type = 'button'; more.className = 'secondary';
+    more.textContent = showAll ? 'اعرض آخر ٥ بس' : 'اعرض الكل (' + cases.length + ')';
+    more.addEventListener('click', () => { showAll = !showAll; renderLog(); });
+    listEl.appendChild(more);
+  }
 }
 
 let syncing = false;
