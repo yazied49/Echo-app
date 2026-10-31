@@ -108,6 +108,10 @@
     <button type="button" class="secondary" id="newCase">حالة جديدة</button>
   </form>
 
+  <div id="dirBox" style="display:none;margin:12px 0">
+    <button type="button" class="secondary" id="pickDir" style="margin-top:0">اختار فولدر العيادة</button>
+    <div id="dirMsg" style="margin-top:6px;font-size:13px;color:var(--muted)"></div>
+  </div>
   <div id="msg" role="status"></div>
   <div id="preview"></div>
   <div id="log">
@@ -395,6 +399,51 @@ function downloadDocs(res) {
   setTimeout(() => download(part(res.files[1].xml), res.files[1].name), 500);
 }
 
+/* ===== save straight into the clinic folder (Chrome/Edge on a computer): <clinic folder>/<MM-YYYY>/ ===== */
+function idbOpen() { return new Promise((res, rej) => { const r = indexedDB.open('echo_fs', 1); r.onupgradeneeded = () => r.result.createObjectStore('kv'); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); }); }
+async function idbGet(k) { const db = await idbOpen(); return new Promise((res, rej) => { const q = db.transaction('kv').objectStore('kv').get(k); q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error); }); }
+async function idbSet(k, v) { const db = await idbOpen(); return new Promise((res, rej) => { const tx = db.transaction('kv', 'readwrite'); tx.objectStore('kv').put(v, k); tx.oncomplete = () => res(); tx.onerror = () => rej(tx.error); }); }
+let rootDir = null;
+const dirMsg = document.getElementById('dirMsg');
+function dirUi() {
+  if (!window.showDirectoryPicker) return;
+  document.getElementById('dirBox').style.display = 'block';
+  dirMsg.textContent = rootDir ? 'الملفات بتنزل في: ' + rootDir.name + ' / (فولدر الشهر)' : 'لسه ما اخترتش فولدر. الملفات بتنزل في Downloads.';
+  document.getElementById('pickDir').textContent = rootDir ? 'غيّر فولدر العيادة' : 'اختار فولدر العيادة';
+}
+async function dirReady(ask) {
+  if (!rootDir) return false;
+  try {
+    let p = await rootDir.queryPermission({ mode: 'readwrite' });
+    if (p !== 'granted' && ask) p = await rootDir.requestPermission({ mode: 'readwrite' });
+    return p === 'granted';
+  } catch (e) { return false; }
+}
+async function nameFree(dir, n) { try { await dir.getFileHandle(n); return false; } catch (e) { return true; } }
+async function saveToFolder(res, month) {
+  if (!(await dirReady(true))) return '';
+  const sub = await rootDir.getDirectoryHandle(month, { create: true });
+  let base = res.base;
+  for (let i = 2; !(await nameFree(sub, base + '.docx') && await nameFree(sub, base + ' - report.docx')) && i < 100; i++) base = res.base + ' (' + i + ')';
+  const names = [base + '.docx', base + ' - report.docx'];
+  for (let i = 0; i < 2; i++) {
+    const blob = makeZip([
+      { name: '[Content_Types].xml', text: res.CONTENT_TYPES }, { name: '_rels/.rels', text: res.RELS }, { name: 'word/document.xml', text: res.files[i].xml },
+    ]);
+    const w = await (await sub.getFileHandle(names[i], { create: true })).createWritable();
+    await w.write(blob); await w.close();
+  }
+  return rootDir.name + '/' + month + '/' + names[0];
+}
+async function deliverDocs(res, month) {
+  try { const where = await saveToFolder(res, month); if (where) return { folder: where }; } catch (e) { /* fall back to a normal download */ }
+  downloadDocs(res); return { download: true };
+}
+document.getElementById('pickDir').addEventListener('click', async () => {
+  try { const h = await window.showDirectoryPicker({ mode: 'readwrite' }); rootDir = h; await idbSet('dir', h); dirUi(); } catch (e) { /* cancelled */ }
+});
+(async () => { try { rootDir = (await idbGet('dir')) || null; } catch (e) { rootDir = null; } dirUi(); })();
+
 function renderLog() {
   const cases = loadCases();
   const pending = cases.filter((c) => !c.synced).length;
@@ -407,7 +456,7 @@ function renderLog() {
     nm.textContent = c.patient_name + (c.nursery ? ' (' + c.nursery + ')' : '') + ' · ' + c.case_date;
     const st = document.createElement('span'); st.className = 'st'; st.textContent = c.synced ? 'اتبعتت' : 'على الجهاز بس';
     const b = document.createElement('button'); b.type = 'button'; b.className = 'secondary'; b.style.marginTop = '0'; b.textContent = 'الملفات';
-    b.addEventListener('click', () => { try { downloadDocs(buildDocs(c.findings)); } catch (e) { syncMsg.textContent = 'خطأ: ' + e.message; } });
+    b.addEventListener('click', async () => { try { const r = await deliverDocs(buildDocs(c.findings), c.month); syncMsg.textContent = r.folder ? 'اتحفظ في: ' + r.folder : 'اتحمّل الملفين.'; } catch (e) { syncMsg.textContent = 'خطأ: ' + e.message; } });
     row.append(nm, st, b); listEl.appendChild(row);
   });
 }
@@ -445,14 +494,13 @@ document.getElementById('backupBtn').addEventListener('click', () => {
   download(new Blob([JSON.stringify(loadCases(), null, 1)], { type: 'application/json' }), 'echo-cases-backup-' + d + '.json');
 });
 
-form.addEventListener('submit', (ev) => {
+form.addEventListener('submit', async (ev) => {
   ev.preventDefault();
   const data = {};
   new FormData(form).forEach((v, k) => { data[k] = String(v); });
   if (!data['Patient name'].trim() || !data['Age'].trim()) { msg.textContent = 'اكتب الاسم والسن.'; return; }
   let res;
   try { res = buildDocs(data); } catch (e) { msg.textContent = 'حصل خطأ: ' + e.message; return; }
-  downloadDocs(res);
   const now = new Date(), p2 = (n) => String(n).padStart(2, '0');
   const cases = loadCases();
   cases.push({
@@ -464,7 +512,8 @@ form.addEventListener('submit', (ev) => {
     findings: data, synced: false,
   });
   const saved = saveCases(cases);
-  msg.textContent = 'اتحمّل ملفين: ' + res.files[0].name + ' و ' + res.files[1].name + (saved ? ' واتحفظت الحالة على الجهاز' : ' (تنبيه: مقدرتش أحفظ الحالة على الجهاز)') + (res.needs ? ' (فيه جمل ناقصة معلّمة بالأصفر)' : '');
+  const out = await deliverDocs(res, p2(now.getMonth() + 1) + '-' + now.getFullYear());
+  msg.textContent = (out.folder ? 'اتحفظ ملفين في: ' + out.folder + ' (+ ملف التقرير جنبه)' : 'اتحمّل ملفين: ' + res.files[0].name + ' و ' + res.files[1].name) + (saved ? ' واتحفظت الحالة على الجهاز' : ' (تنبيه: مقدرتش أحفظ الحالة على الجهاز)') + (res.needs ? ' (فيه جمل ناقصة معلّمة بالأصفر)' : '');
   showPreview(res); renderLog(); syncAll(false);
 });
 
