@@ -137,7 +137,7 @@ function buildDocs(FORM) {
 const STRUCTURES = [
   { id: 'situs', normal: 'Situs solitus, levocardia, AV-VA concordance.' },
   { id: 'venous', normal: 'Normal systemic & pulmonary venous drainage.' },
-  { id: 'atrial_septum', normal: null, options: {
+  { id: 'atrial_septum', normal: 'Normal intra Atrail septum.', options: {
     PFO: { echo: 'Patent Foramen Oval[, {size_mm} mm], with {shunt} shunt.', conclusion: 'PFO[, {size_mm} mm], {shunt} shunt.' },
     'ASD II': { echo: null, conclusion: null },
     'ASD primum': { echo: null, conclusion: null } } },
@@ -146,7 +146,7 @@ const STRUCTURES = [
     PMVSD: { echo: null, conclusion: null },
     'Apical VSD': { echo: null, conclusion: null },
     MVSD: { echo: null, conclusion: null } } },
-  { id: 'tricuspid', normal: null, options: {
+  { id: 'tricuspid', normal: 'Normal morphology and movement of Tricuspid valve.', options: {
     TR: { echo: '{severity} Tricuspid valve regurgue[, RVSP = {rvsp} mmHg].', conclusion: '{severity} TR[, RVSP = {rvsp} mmHg].',
           concludeWhen: (f) => f.severity !== 'Mild' } } },
   { id: 'phtn', normal: '', options: { PHTN: { echo: '', conclusion: '{severity} PHTN.' } } },
@@ -156,7 +156,7 @@ const STRUCTURES = [
     PS: { echo: null, conclusion: null } } },
   { id: 'semilunar_valves', pair: 'second', options: {
     AS: { echo: null, conclusion: '{severity} AS[, PG = {pg} mmHg][, mean PG = {mean_pg} mmHg].' } } },
-  { id: 'ductus', normal: null, options: {
+  { id: 'ductus', normal: 'No PDA.', options: {
     PDA: { echo: '{severity} Patent Ductus Arteriosus[, {size_mm} mm], {shunt} shunt.', conclusion: '{severity} PDA[, {size_mm} mm], {shunt} shunt.' } } },
   { id: 'arch', normal: 'Normal Lt. Aortic arch, no COA.' },
   { id: 'thrombus', normal: 'No thrombus or mass.' },
@@ -166,6 +166,7 @@ const STRUCTURES = [
 const CONCLUSION_ORDER = ['atrial_septum', 'ventricular_septum', 'tricuspid', 'phtn', 'mitral', 'pulmonary_valve', 'semilunar_valves', 'ductus'];
 // his single sentence for normal pulmonary + aortic valves; used only when both are normal
 const PAIR_NORMAL = 'Normal Pulmonary & Aortic valves, no RVOTO, no LVOTO.';
+const NORMAL_CONCLUSION = 'Normal intra Cardiac structure and function.';
 const SHUNT = { report: 'Lt-Rt', note: 'L-R' };
 
 // ---------- read the form ----------
@@ -207,6 +208,7 @@ function fill(t, vars, shunt) {
     })
     .replace(/\{(\w+)\}/g, (_, k) => val(k));
 }
+const plain = (fd) => (fd.severity ? fd.severity + ' ' : '') + fd.option + (fd.size_mm ? ', ' + fd.size_mm + ' mm' : '') + '.';
 function compose(style) {
   const shunt = SHUNT[style];
   const echo = [], conclusion = [];
@@ -215,12 +217,12 @@ function compose(style) {
     const fd = findings[s.id];
     if (fd) {
       const opt = s.options[fd.option];
-      if (opt.echo === null) echo.push({ text: '[NEEDS WORDING: ' + s.id + ' / ' + fd.option + ']', missing: true });
+      if (opt.echo === null) echo.push({ text: plain(fd) });
       else if (opt.echo !== '') echo.push({ text: fill(opt.echo, fd, shunt) });
     } else if (s.pair) {
       if (bothNormal) { if (s.pair === 'first') echo.push({ text: PAIR_NORMAL }); }
-      else echo.push({ text: '[NEEDS WORDING: normal ' + s.id + ']', missing: true });
-    } else if (s.normal === null) echo.push({ text: '[NEEDS WORDING: normal ' + s.id + ']', missing: true });
+      else { /* one valve abnormal: its own line covers it */ }
+    } else if (s.normal === null) { /* no wording yet: leave the line out */ }
     else if (s.normal !== '') echo.push({ text: s.normal });
   }
   for (const id of CONCLUSION_ORDER) {
@@ -228,10 +230,11 @@ function compose(style) {
     if (!fd) continue;
     const opt = STRUCTURES.find((s) => s.id === id).options[fd.option];
     if (opt.concludeWhen && !opt.concludeWhen(fd)) continue;
-    if (opt.conclusion === null) { conclusion.push({ text: '[NEEDS WORDING: conclusion ' + id + ' / ' + fd.option + ']', missing: true }); continue; }
+    if (opt.conclusion === null) { conclusion.push({ text: plain(fd) }); continue; }
     conclusion.push({ text: fill(opt.conclusion, fd, shunt) });
   }
-  if (!conclusion.length) conclusion.push({ text: '[NEEDS WORDING: normal-study conclusion]', missing: true });
+  if (!conclusion.length) conclusion.push({ text: NORMAL_CONCLUSION });
+
   return { echo, conclusion };
 }
 
